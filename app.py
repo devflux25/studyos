@@ -6,6 +6,8 @@ from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGener
 from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_core.prompts import PromptTemplate
 import google.generativeai as genai
+from datetime import date
+import sqlite3 
 from dotenv import load_dotenv
 import os
 
@@ -69,10 +71,18 @@ def answer_question(question):
 def mcq_generator(text):
     model = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
-        google_api_key=os.getenv("GEMINI_API_KEY")
+        google_api_key=os.getenv("GEMINI_API_KEY"),
+        temperature=1.0
     )
-    prompt = f"""Generate 5 MCQs from this text.
-    Return ONLY a JSON array, no extra text, no markdown:
+    prompt = f"""You are a smart study assistant. Generate 5 MCQs to test conceptual understanding.
+
+    STRICT RULES:
+    - Only ask about concepts, theories, laws, formulas and definitions
+    - NEVER ask about author names, dates, course codes, batch years, exam schedules
+    - Questions must test if the student actually understands the topic
+    - Each question must be different from the others
+
+    Return ONLY a JSON array, no extra text:
     [
     {{
         "question": "...",
@@ -80,6 +90,7 @@ def mcq_generator(text):
         "answer": "A"
     }}
     ]
+
     Text: {text[:3000]}"""
     response = model.invoke(prompt)
     import json
@@ -92,7 +103,39 @@ def mcq_generator(text):
         return json.loads(match.group())
     return []
 
-    
+def weak_topic_tracker(score,total,subject):
+    conn = sqlite3.connect('my_database.db')
+
+    cursor = conn.cursor()   
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS  quiz_results(
+        subject TEXT,
+        score INTEGER,
+        total INTEGER,
+        date TEXT
+    )
+    """)
+
+    conn.commit()
+    today = str(date.today())
+
+    # What to do with subject how to input them 
+    cursor.execute("""
+        INSERT INTO quiz_results (subject, score, total, date)
+        VALUES (?, ?, ?, ?)
+    """, ( subject ,score, total, today))
+
+    conn.commit()
+    conn.close()
+ 
+
+def show_analytics():
+    conn = sqlite3.connect('my_database.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT subject, score, total, date FROM quiz_results")
+    results = cursor.fetchall()
+    conn.close()
+    return results
 
 
 def main():
@@ -115,6 +158,7 @@ def main():
                     get_vector_store(chunks)
                     st.success("PDF processed! You can now ask questions.")
 
+
     # main area - ask questions
     question = st.text_input("Ask a question from your notes:")
     
@@ -131,7 +175,7 @@ def main():
 
     st.divider()
     st.subheader("🧠 Quiz Mode")
-
+    subject = st.text_input("Enter subject name (e.g. Physics)")
     if st.button("Generate MCQs from my notes"):
         if not os.path.exists("faiss_index"):
             st.warning("Please upload and process a PDF first!")
@@ -173,9 +217,28 @@ def main():
             
             st.write(f"## Your Score: {score}/{len(st.session_state.mcqs)}")
 
+            total = len(st.session_state.mcqs)
+
+            weak_topic_tracker(score,total,subject)
+
+    st.divider()
+    st.subheader("📊 Your Progress")
+
+    if st.button("Show My Progress"):
+        results = show_analytics()
+        if len(results) == 0:
+            st.info("No quiz attempts yet. Take a quiz first!")
+        else:
+            import pandas as pd
+            df = pd.DataFrame(results, columns=["Subject", "Score", "Total", "Date"])
+            df["Percentage"] = (df["Score"] / df["Total"] * 100).round(1)
+            st.dataframe(df)
+            st.bar_chart(df.set_index("Date")["Percentage"])
+
+
 if __name__ == "__main__":
     main()
 
 
 
-    
+
