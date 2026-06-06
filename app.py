@@ -67,31 +67,45 @@ def answer_question(question):
     else:
         return str(response)
     
+def extract_topics(text):
+    model = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=os.getenv("GEMINI_API_KEY"),
+        temperature=0.3
+    )
+    prompt = f"""Extract the main topics from this text.
+    Return ONLY a JSON array of topic names, nothing else:
+    ["Topic 1", "Topic 2", "Topic 3"]
 
-def mcq_generator(text):
+    Text: {text[:2000]}"""
+    
+    response = model.invoke(prompt)
+    import json, re
+    match = re.search(r'\[.*\]', response.content, re.DOTALL)
+    if match:
+        return json.loads(match.group())
+    return []
+    
+
+def mcq_generator(text,topic):
     model = ChatGoogleGenerativeAI(
         model="gemini-2.5-flash",
         google_api_key=os.getenv("GEMINI_API_KEY"),
         temperature=1.0
     )
-    prompt = f"""You are a smart study assistant. Generate 5 MCQs to test conceptual understanding.
+    prompt = f"""Generate 5 MCQs specifically about: {topic}
+    
+    Use this text as reference:
+    {text[:3000]}
 
     STRICT RULES:
-    - Only ask about concepts, theories, laws, formulas and definitions
-    - NEVER ask about author names, dates, course codes, batch years, exam schedules
-    - Questions must test if the student actually understands the topic
-    - Each question must be different from the others
+    - Only ask conceptual questions about {topic}
+    - Never ask about dates, authors, codes
+    - Make questions test real understanding
 
-    Return ONLY a JSON array, no extra text:
-    [
-    {{
-        "question": "...",
-        "options": ["A. ...", "B. ...", "C. ...", "D. ..."],
-        "answer": "A"
-    }}
-    ]
+    Return ONLY JSON array:
+    [{{"question":"...","options":["A...","B...","C...","D..."],"answer":"A"}}]"""
 
-    Text: {text[:3000]}"""
     response = model.invoke(prompt)
     import json
     import re
@@ -103,13 +117,14 @@ def mcq_generator(text):
         return json.loads(match.group())
     return []
 
-def weak_topic_tracker(score,total,subject):
+def weak_topic_tracker(score,total,subject,topic):
     conn = sqlite3.connect('my_database.db')
 
     cursor = conn.cursor()   
     cursor.execute("""
-    CREATE TABLE IF NOT EXISTS  quiz_results(
+    CREATE TABLE IF NOT EXISTS quiz_results(
         subject TEXT,
+        topic TEXT,
         score INTEGER,
         total INTEGER,
         date TEXT
@@ -121,9 +136,9 @@ def weak_topic_tracker(score,total,subject):
 
     # What to do with subject how to input them 
     cursor.execute("""
-        INSERT INTO quiz_results (subject, score, total, date)
-        VALUES (?, ?, ?, ?)
-    """, ( subject ,score, total, today))
+        INSERT INTO quiz_results (subject,topic, score, total, date)
+        VALUES (?,?, ?, ?, ?)
+    """, ( subject,topic ,score, total, today))
 
     conn.commit()
     conn.close()
@@ -132,10 +147,42 @@ def weak_topic_tracker(score,total,subject):
 def show_analytics():
     conn = sqlite3.connect('my_database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT subject, score, total, date FROM quiz_results")
+    cursor.execute("SELECT subject,topic, score, total, date FROM quiz_results")
     results = cursor.fetchall()
     conn.close()
     return results
+
+
+def study_plan_generator():
+    conn = sqlite3.connect('my_database.db')
+    cursor = conn.cursor()
+    cursor.execute("""
+    SELECT topic, AVG(score*100.0/total) as avg 
+    FROM quiz_results 
+    GROUP BY topic 
+    HAVING avg < 60
+    """)
+    weak = cursor.fetchall()
+    weak_topics = [row[0] for row in weak]
+
+    conn.close()
+
+    model = ChatGoogleGenerativeAI(
+        model="gemini-2.5-flash",
+        google_api_key=os.getenv("GEMINI_API_KEY")
+    )
+
+    prompt = f"""I am an engineering student weak in these specific topics: {weak_topics}
+
+    Create a focused 3-day study plan:
+    - Day 1: Foundation concepts of weak topics
+    - Day 2: Practice problems and derivations  
+    - Day 3: Revision and mock test prep
+
+    Be specific to each topic. Keep it realistic — max 3 hours per day."""
+    response = model.invoke(prompt)
+    return response.content
+    
 
 
 def main():
@@ -176,21 +223,29 @@ def main():
     st.divider()
     st.subheader("🧠 Quiz Mode")
     subject = st.text_input("Enter subject name (e.g. Physics)")
+
     if st.button("Generate MCQs from my notes"):
-        if not os.path.exists("faiss_index"):
-            st.warning("Please upload and process a PDF first!")
+        if pdf_file is None:
+            st.warning("Please upload a PDF first!")
         else:
             with st.spinner("Generating questions..."):
                 try:
-                    # get text from uploaded pdf
                     raw_text = get_pdf_text(pdf_file)
-                    mcqs = mcq_generator(raw_text)
+                    
+                    # Step 1 - extract topics
+                    topics = extract_topics(raw_text)
+                    st.session_state.topics = topics
+                    st.write("Topics found:", topics)
+                    
+                    # Step 2 - generate MCQs (use first topic for now)
+                    mcqs = mcq_generator(raw_text, topics[0])
                     st.session_state.mcqs = mcqs
+                    st.session_state.topic = topics[0]
                     st.session_state.score = 0
                     st.session_state.answered = [None] * len(mcqs)
                 except Exception as e:
                     st.error(f"Error: {e}")
-
+    
     # display MCQs
     if "mcqs" in st.session_state and st.session_state.mcqs:
         st.write(f"**Total questions: {len(st.session_state.mcqs)}**")
@@ -219,7 +274,7 @@ def main():
 
             total = len(st.session_state.mcqs)
 
-            weak_topic_tracker(score,total,subject)
+            weak_topic_tracker(score,total,subject,st.session_state.get('topics', ['Unknown'])[0])
 
     st.divider()
     st.subheader("📊 Your Progress")
@@ -234,6 +289,17 @@ def main():
             df["Percentage"] = (df["Score"] / df["Total"] * 100).round(1)
             st.dataframe(df)
             st.bar_chart(df.set_index("Date")["Percentage"])
+
+    st.divider()
+    st.subheader("📅 Study Plan")
+
+    if st.button("Generate Study Plan"):
+        with st.spinner("Creating your study plan..."):
+            plan = study_plan_generator()
+            if plan:
+                st.write(plan)
+            else:
+                st.info("Take some quizzes first so I can identify your weak topics!")
 
 
 if __name__ == "__main__":
