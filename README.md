@@ -9,7 +9,7 @@ study plan — all powered by AI.
 > exams and couldn't find a tool that actually understood my own notes.
 
 ## 🔗 Live Demo
-[Click here to try StudyOS](your-streamlit-url-here)
+[Click here to try StudyOS](https://studyos-kairav.streamlit.app/)
 
 ## ✨ Features
 - 📄 Upload any PDF notes or PYQs
