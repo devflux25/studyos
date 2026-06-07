@@ -19,6 +19,77 @@ genai.configure(api_key=os.getenv("GEMINI_API_KEY"))
 #st.title("🎓 StudyOS")
 #st.write("Your AI-powered study companion")
 
+st.markdown("""
+<div style='background: linear-gradient(90deg, #00C9A7, #00B4D8); 
+     padding: 1.5rem; border-radius: 12px; margin-bottom: 1.5rem;'>
+    <h3 style='color:white; margin:0'>👋 Welcome to StudyOS</h3>
+    <p style='color:rgba(255,255,255,0.85); margin:0.5rem 0 0'>
+        Upload your notes → Ask questions → Take a quiz → Track your progress
+    </p>
+</div>
+""", unsafe_allow_html=True)
+
+st.markdown("""
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@300;400;500;600;700&display=swap');
+
+html, body, [class*="css"] {
+    font-family: 'Space Grotesk', sans-serif !important;
+}
+
+.stApp {
+    background: linear-gradient(135deg, #0a1628, #0d2137, #0a2818);
+}
+            
+textarea, input {
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+}
+
+.block-container {
+    background: rgba(255, 255, 255, 0.04);
+    backdrop-filter: blur(10px);
+    border-radius: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 2rem 4rem;
+    margin-top: 1rem;
+    max-width: 900px;
+}
+            
+section[data-testid="stSidebar"] {
+    background: linear-gradient(180deg, #0a1628, #0d2137);
+    border-right: 1px solid rgba(255,255,255,0.08);
+}
+
+section[data-testid="stSidebar"] * {
+    color: white !important;
+}
+
+div.stButton > button {
+    width: 100%;
+    padding: 10px;
+    font-size: 15px;
+    border-radius: 8px;
+    border: 1px solid rgba(255,255,255,0.15);
+    background: rgba(255,255,255,0.07);
+    color: white;
+}
+
+div.stButton > button:hover {
+    background: rgba(255,255,255,0.15);
+    border-color: rgba(255,255,255,0.3);
+}
+
+textarea, input {
+    border: 1px solid rgba(255,255,255,0.1) !important;
+    border-radius: 8px !important;
+    background: rgba(255,255,255,0.05) !important;
+}
+</style>
+""", unsafe_allow_html=True)
+
+
+
 def get_pdf_text(pdf_file):
     text = ""
     pdf_reader = PdfReader(pdf_file)
@@ -147,7 +218,7 @@ def weak_topic_tracker(score,total,subject,topic):
 def show_analytics():
     conn = sqlite3.connect('my_database.db')
     cursor = conn.cursor()
-    cursor.execute("SELECT subject,topic, score, total, date FROM quiz_results")
+    cursor.execute("SELECT subject, score, total, date FROM quiz_results")
     results = cursor.fetchall()
     conn.close()
     return results
@@ -187,14 +258,19 @@ def study_plan_generator():
 
 def main():
     st.set_page_config(page_title="StudyOS", page_icon="🎓")
-    st.title("🎓 StudyOS")
-    st.write("Your AI-powered study companion")
-
-    # sidebar - upload PDF
+    
+    
+    # sidebar
     with st.sidebar:
+        st.markdown("### 📖 How to use")
+        st.markdown("1. Upload your PDF notes")
+        st.markdown("2. Click Process PDF")
+        st.markdown("3. Ask questions or take a quiz")
+
+
+        st.divider()
         st.subheader("Upload Your Notes")
         pdf_file = st.file_uploader("Upload a PDF", type="pdf")
-        
         if st.button("Process PDF"):
             if pdf_file is None:
                 st.warning("Please upload a PDF first!")
@@ -203,17 +279,16 @@ def main():
                     raw_text = get_pdf_text(pdf_file)
                     chunks = get_text_chunks(raw_text)
                     get_vector_store(chunks)
-                    st.success("PDF processed! You can now ask questions.")
+                    st.success("PDF processed!")
 
-
-    # main area - ask questions
-    question = st.text_input("Ask a question from your notes:")
-    
+    # step 2
+    st.subheader("Step 1 — Ask a question from your notes")
+    question = st.text_input("Type your question here:")
     if st.button("Get Answer"):
         if question.strip() == "":
             st.warning("Please type a question!")
         else:
-            with st.spinner("Finding answer in your notes..."):
+            with st.spinner("Finding answer..."):
                 try:
                     answer = answer_question(question)
                     st.write(answer)
@@ -221,9 +296,10 @@ def main():
                     st.error("Please upload and process a PDF first!")
 
     st.divider()
-    st.subheader("🧠 Quiz Mode")
-    subject = st.text_input("Enter subject name (e.g. Physics)")
 
+    # step 3
+    st.subheader("Step 2 — Test yourself 🧠")
+    subject = st.text_input("Enter subject name (e.g. Physics)")
     if st.button("Generate MCQs from my notes"):
         if pdf_file is None:
             st.warning("Please upload a PDF first!")
@@ -231,13 +307,8 @@ def main():
             with st.spinner("Generating questions..."):
                 try:
                     raw_text = get_pdf_text(pdf_file)
-                    
-                    # Step 1 - extract topics
                     topics = extract_topics(raw_text)
                     st.session_state.topics = topics
-                    st.write("Topics found:", topics)
-                    
-                    # Step 2 - generate MCQs (use first topic for now)
                     mcqs = mcq_generator(raw_text, topics[0])
                     st.session_state.mcqs = mcqs
                     st.session_state.topic = topics[0]
@@ -245,20 +316,13 @@ def main():
                     st.session_state.answered = [None] * len(mcqs)
                 except Exception as e:
                     st.error(f"Error: {e}")
-    
-    # display MCQs
+
     if "mcqs" in st.session_state and st.session_state.mcqs:
         st.write(f"**Total questions: {len(st.session_state.mcqs)}**")
-        
         for i, mcq in enumerate(st.session_state.mcqs):
             st.write(f"**Q{i+1}. {mcq['question']}**")
-            answer = st.radio(
-                "Choose your answer:",
-                mcq['options'],
-                key=f"q{i}"
-            )
+            answer = st.radio("Choose your answer:", mcq['options'], key=f"q{i}")
             st.session_state.answered[i] = answer
-        
         if st.button("Submit Quiz"):
             score = 0
             for i, mcq in enumerate(st.session_state.mcqs):
@@ -269,16 +333,14 @@ def main():
                     st.success(f"Q{i+1} ✅ Correct!")
                 else:
                     st.error(f"Q{i+1} ❌ Wrong! Correct answer: {correct}")
-            
             st.write(f"## Your Score: {score}/{len(st.session_state.mcqs)}")
-
             total = len(st.session_state.mcqs)
-
-            weak_topic_tracker(score,total,subject,st.session_state.get('topics', ['Unknown'])[0])
+            weak_topic_tracker(score, total, subject, st.session_state.get('topics', ['Unknown'])[0])
 
     st.divider()
-    st.subheader("📊 Your Progress")
 
+    # step 4
+    st.subheader("Step 3 — Track your progress 📊")
     if st.button("Show My Progress"):
         results = show_analytics()
         if len(results) == 0:
@@ -291,15 +353,16 @@ def main():
             st.bar_chart(df.set_index("Date")["Percentage"])
 
     st.divider()
-    st.subheader("📅 Study Plan")
 
+    # step 5
+    st.subheader("Step 4 — Get your study plan 📅")
     if st.button("Generate Study Plan"):
         with st.spinner("Creating your study plan..."):
             plan = study_plan_generator()
             if plan:
                 st.write(plan)
             else:
-                st.info("Take some quizzes first so I can identify your weak topics!")
+                st.info("Take some quizzes first!")
 
 
 if __name__ == "__main__":
