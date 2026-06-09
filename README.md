@@ -1,4 +1,3 @@
-# studyos
 # 🎓 StudyOS — AI Study Companion
 
 Tired of making flashcards manually? StudyOS lets you upload your notes 

@@ -165,17 +165,17 @@ def mcq_generator(text,topic):
         temperature=1.0
     )
     prompt = f"""Generate 5 MCQs specifically about: {topic}
-    
+
     Use this text as reference:
     {text[:3000]}
 
     STRICT RULES:
     - Only ask conceptual questions about {topic}
     - Never ask about dates, authors, codes
-    - Make questions test real understanding
+    - Options MUST start with A. B. C. D.
 
     Return ONLY JSON array:
-    [{{"question":"...","options":["A...","B...","C...","D..."],"answer":"A"}}]"""
+    [{{"question":"...","options":["A. ...","B. ...","C. ...","D. ..."],"answer":"A"}}]"""
 
     response = model.invoke(prompt)
     import json
@@ -327,8 +327,14 @@ def main():
             score = 0
             for i, mcq in enumerate(st.session_state.mcqs):
                 selected = st.session_state.answered[i]
-                correct = mcq['answer']
-                if selected and selected.startswith(correct):
+                correct = mcq['answer'].strip().upper()
+                
+                # get just the first letter of selected answer
+                selected_letter = selected[0].upper() if selected else ""
+                # get just the first letter of correct answer
+                correct_letter = correct[0].upper()
+                
+                if selected_letter == correct_letter:
                     score += 1
                     st.success(f"Q{i+1} ✅ Correct!")
                 else:
